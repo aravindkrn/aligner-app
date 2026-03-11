@@ -1,3 +1,13 @@
+<!--
+  ALIGNER JOURNEY PWA v3 - Clear Aligner Treatment Tracker
+  Single-file PWA: index.html + manifest.json + sw.js
+  Storage: localStorage "alignerJourney" (JSON) + IndexedDB "alignerPhotosDB" (photos)
+  Tabs: Setup | Calendar | Daily | Photos | Progress
+  Data model v3: setup{name,gender,upperSets,lowerSets,daysPerSet,startDate,adjustments[]},
+  wearLog, notes, photos, painLog, changeLog, photoCategories, notifications
+  Progress = days elapsed / total treatment days (including postponements)
+  Setup changes after initial save require confirmation
+-->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -51,7 +61,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .pose-guide{background:var(--bg);border-radius:8px;padding:.75rem;margin-bottom:.75rem;font-size:.85rem;color:var(--muted);border-left:3px solid var(--primary)}
 .video-container{position:relative;width:100%;max-width:360px;margin:0 auto .75rem}
 #cameraPreview{width:100%;border-radius:12px;background:var(--bg);display:block}
-.face-overlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:65%;height:85%;border:3px dashed var(--primary);border-radius:50% 50% 50% 50%/60% 60% 40% 40%;pointer-events:none;opacity:.4}
+.face-overlay-svg{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:70%;height:90%;pointer-events:none;z-index:2}
 .photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:.6rem;margin-top:.75rem}
 .photo-item{position:relative;aspect-ratio:3/4;border-radius:8px;overflow:hidden;cursor:pointer;background:var(--bg);border:2px solid var(--border)}
 .photo-item img{width:100%;height:100%;object-fit:cover}
@@ -100,7 +110,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 <body>
 
 <header class="header">
-    <h1>🦷 Aligner Journey</h1>
+    <h1 id="hdrTitle">🦷 Aligner Journey</h1>
     <div class="progress-summary">
         <span id="hdrDay">Day 1</span>
         <span>•</span>
@@ -122,9 +132,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 <section id="tab-setup" class="tab-content active">
     <div class="card">
         <h2>⚙️ Treatment Setup</h2>
+        <div class="form-group"><label>Your Name <span style="color:var(--muted);font-weight:400">(optional)</span></label><input type="text" id="inName" placeholder="e.g. Arav" maxlength="40"></div>
+        <div class="form-group"><label>Gender <span style="color:var(--muted);font-weight:400">(helps face guide)</span></label><select id="inGender"><option value="">- Select -</option><option value="male">Male</option><option value="female">Female</option></select></div>
         <div class="form-group"><label>Upper Aligner Sets</label><input type="number" id="inUpper" min="1" max="50"></div>
         <div class="form-group"><label>Lower Aligner Sets</label><input type="number" id="inLower" min="1" max="50"></div>
-        <div class="form-group"><label>Days per Set</label><input type="number" id="inDays" min="1" max="30"></div>
+        <div class="form-group"><label>Weeks per Set</label><input type="number" id="inWeeks" min="1" max="8" step="1" placeholder="2"></div>
         <div class="form-group"><label>Treatment Start Date</label><input type="date" id="inStart"></div>
         <button class="btn" id="btnSaveSetup">Save Setup</button>
     </div>
@@ -149,6 +161,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 <section id="tab-calendar" class="tab-content">
     <div class="card"><h2>📅 Upper Aligners</h2><div class="calendar-grid" id="calUpper"></div></div>
     <div class="card"><h2>📅 Lower Aligners</h2><div class="calendar-grid" id="calLower"></div></div>
+    <div class="card">
+        <h2>⏩ Extend / Postpone Set</h2>
+        <p style="font-size:.85rem;color:var(--muted);margin-bottom:.75rem">Need extra days on current set? All following sets shift accordingly.</p>
+        <div class="form-group"><label>Extra Days to Add</label><input type="number" id="inPostpone" min="1" max="60" placeholder="e.g. 3"></div>
+        <div class="form-group"><label>Reason <span style="color:var(--muted);font-weight:400">(optional)</span></label><input type="text" id="inPostponeReason" placeholder="e.g. Travel, re-order" maxlength="100"></div>
+        <button class="btn btn-secondary" id="btnPostpone">Extend Current Set</button>
+        <div id="postponeHistory" style="margin-top:.75rem"></div>
+    </div>
 </section>
 
 <!-- TAB: Daily -->
@@ -181,7 +201,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
         <div style="text-align:center">
             <div class="video-container">
                 <video id="cameraPreview" autoplay playsinline></video>
-                <div class="face-overlay" id="faceOverlay" style="display:none"></div>
+                <svg id="faceOverlay" class="face-overlay-svg" style="display:none" viewBox="0 0 200 280" fill="none" xmlns="http://www.w3.org/2000/svg"><ellipse cx="100" cy="130" rx="70" ry="92" stroke="#38bdf8" stroke-width="2" stroke-dasharray="6 4" opacity=".55"/><line x1="38" y1="42" x2="162" y2="42" stroke="#38bdf8" stroke-width="1" stroke-dasharray="4 4" opacity=".3"/><line x1="48" y1="218" x2="152" y2="218" stroke="#38bdf8" stroke-width="1" stroke-dasharray="4 4" opacity=".3"/><path d="M48,100 Q68,90 88,100" stroke="#38bdf8" stroke-width="1.2" opacity=".35"/><path d="M112,100 Q132,90 152,100" stroke="#38bdf8" stroke-width="1.2" opacity=".35"/><ellipse cx="68" cy="112" rx="16" ry="9" stroke="#38bdf8" stroke-width="1.5" opacity=".5"/><circle cx="68" cy="112" r="4" stroke="#38bdf8" stroke-width=".8" opacity=".3"/><ellipse cx="132" cy="112" rx="16" ry="9" stroke="#38bdf8" stroke-width="1.5" opacity=".5"/><circle cx="132" cy="112" r="4" stroke="#38bdf8" stroke-width=".8" opacity=".3"/><path d="M100,125 L100,155" stroke="#38bdf8" stroke-width="1.2" opacity=".35"/><path d="M92,162 Q100,168 108,162" stroke="#38bdf8" stroke-width="1.2" opacity=".35"/><circle cx="92" cy="160" r="3" stroke="#38bdf8" stroke-width=".8" opacity=".25"/><circle cx="108" cy="160" r="3" stroke="#38bdf8" stroke-width=".8" opacity=".25"/><path d="M78,188 Q100,198 122,188" stroke="#38bdf8" stroke-width="1.5" opacity=".5"/><path d="M82,188 Q100,180 118,188" stroke="#38bdf8" stroke-width="1" opacity=".3"/><line x1="80" y1="188" x2="120" y2="188" stroke="#38bdf8" stroke-width=".8" opacity=".3"/><line x1="100" y1="35" x2="100" y2="225" stroke="#38bdf8" stroke-width=".5" stroke-dasharray="2 8" opacity=".15"/><line x1="30" y1="112" x2="170" y2="112" stroke="#38bdf8" stroke-width=".5" stroke-dasharray="2 8" opacity=".15"/><text x="100" y="258" text-anchor="middle" fill="#38bdf8" font-size="11" font-family="sans-serif" opacity=".5">Align face within guides</text></svg>
             </div>
             <div class="btn-row" id="camBtns">
                 <button class="btn" id="btnStartCam">Start Camera</button>
@@ -246,11 +266,23 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
             <div class="stat-card"><div class="value" id="sNotes">0</div><div class="label">Notes</div></div>
             <div class="stat-card"><div class="value" id="sPerfect">0</div><div class="label">22h+ Days</div></div>
             <div class="stat-card"><div class="value" id="sSets">0</div><div class="label">Sets Done</div></div>
+          <div class="stat-card"><div class="value" id="sDaysCompleted">0</div><div class="label">Days Done</div></div>
+          <div class="stat-card"><div class="value" id="sDaysLeft">0</div><div class="label">Days Left</div></div>
+          <div class="stat-card"><div class="value" id="sDayInSet">0</div><div class="label">Day in Set</div></div>
         </div>
         <canvas id="wearChart" style="width:100%;height:220px;margin-top:1rem"></canvas>
     </div>
     <div class="card">
-        <h2>📤 Export / Backup</h2>
+        <h2>🔔 Notifications</h2>
+        <div id="notifStatus" style="font-size:.85rem;color:var(--muted);margin-bottom:.75rem;">Checking notification permission...</div>
+        <div class="btn-row">
+          <button class="btn btn-secondary" id="btnEnableNotif" onclick="App.enableNotifications()">Enable Notifications</button>
+          <button class="btn btn-secondary" onclick="App.testNotification()">Send Test</button>
+        </div>
+        <p style="font-size:.75rem;color:var(--muted);margin-top:.5rem;">ℹ️ Notifications only fire while the app is open or recently used. For background alerts, keep the app pinned in recent apps.</p>
+      </div>
+      <div class="card">
+      <h2>📤 Export / Backup</h2>
         <div class="btn-row">
             <button class="btn btn-secondary" id="btnExportJSON">📄 JSON</button>
             <button class="btn btn-secondary" id="btnExportTxt">📋 Report</button>
@@ -262,6 +294,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     <div class="card">
         <h2>🔄 Change History</h2>
         <div id="changeHistory"><p style="color:var(--muted);text-align:center;font-size:.85rem">No changes logged yet.</p></div>
+        <button class="btn btn-small btn-danger hidden" id="btnClearHistory" style="margin-top:.5rem">🗑️ Clear All History</button>
     </div>
 </section>
 
@@ -362,10 +395,10 @@ var App = {
   },
   /* Data */
   defaults:function(){
-    return {_version:2,setup:{upperSets:10,lowerSets:16,daysPerSet:14,startDate:'2026-02-27'},
+    return {_version:3,setup:{name:'',gender:'',upperSets:10,lowerSets:16,daysPerSet:14,startDate:'',adjustments:[]},
       wearLog:{},notes:[],photos:[],painLog:{},changeLog:[],
       photoCategories:JSON.parse(JSON.stringify(this.DEFAULT_CATS)),
-      notifications:{setChangeConfirmedDate:''}};
+      notifications:{setChangeConfirmedDate:'',lastMorning:'',lastEvening:''}};
   },
   loadData:function(){
     var raw=localStorage.getItem(this.STORAGE_KEY);
@@ -381,7 +414,12 @@ var App = {
         if(!Array.isArray(this.data.changeLog))this.data.changeLog=[];
         if(!Array.isArray(this.data.photoCategories)||this.data.photoCategories.length===0)
           this.data.photoCategories=JSON.parse(JSON.stringify(this.DEFAULT_CATS));
-        if(!this.data.notifications)this.data.notifications={setChangeConfirmedDate:''};
+        if(!this.data.notifications)this.data.notifications={setChangeConfirmedDate:'',lastMorning:'',lastEvening:''};
+        if(!this.data.notifications.lastMorning)this.data.notifications.lastMorning='';
+        if(!this.data.notifications.lastEvening)this.data.notifications.lastEvening='';
+        if(typeof this.data.setup.name==='undefined')this.data.setup.name='';
+        if(typeof this.data.setup.gender==='undefined')this.data.setup.gender='';
+        if(!Array.isArray(this.data.setup.adjustments))this.data.setup.adjustments=[];
       }catch(e){this.data=this.defaults();}
     }else{this.data=this.defaults();}
     delete this.data.currentSymptoms;
@@ -401,13 +439,39 @@ var App = {
     return chain;
   },
   computeSetDay:function(){
+    if(!this.data.setup.startDate){this.data.currentDay=0;this.data.currentSet=0;this.data.dayInSet=0;return;}
     var s=new Date(this.data.setup.startDate),n=new Date();
     s.setHours(0,0,0,0);n.setHours(0,0,0,0);
-    var dp=Math.floor((n-s)/86400000)+1;
-    this.data.currentDay=Math.max(1,dp);
-    this.data.currentSet=Math.max(1,Math.ceil(dp/this.data.setup.daysPerSet));
+    var totalDaysPassed=Math.floor((n-s)/86400000)+1;
+    this.data.currentDay=Math.max(0,totalDaysPassed);
+    var adjs=this.data.setup.adjustments||[],ts=this.totalSets(),dayAccum=0;
+    for(var i=1;i<=ts;i++){
+      var extra=0;adjs.forEach(function(a){if(a.setNum===i)extra+=a.extraDays;});
+      var setDays=this.data.setup.daysPerSet+extra;
+      if(totalDaysPassed<=dayAccum+setDays){this.data.currentSet=i;this.data.dayInSet=totalDaysPassed-dayAccum;return;}
+      dayAccum+=setDays;
+    }
+    this.data.currentSet=ts;this.data.dayInSet=0;
   },
   totalSets:function(){return Math.max(this.data.setup.upperSets,this.data.setup.lowerSets);},
+  totalTreatmentDays:function(){
+    var ts=this.totalSets(),adjs=this.data.setup.adjustments||[],total=ts*this.data.setup.daysPerSet;
+    adjs.forEach(function(a){total+=a.extraDays;});return total;
+  },
+  getSetDates:function(setNum){
+    var adjs=this.data.setup.adjustments||[],base=new Date(this.data.setup.startDate);base.setHours(0,0,0,0);
+    var offset=0;
+    for(var i=1;i<setNum;i++){var extra=0;adjs.forEach(function(a){if(a.setNum===i)extra+=a.extraDays;});offset+=this.data.setup.daysPerSet+extra;}
+    var start=new Date(base);start.setDate(base.getDate()+offset);
+    var setExtra=0;adjs.forEach(function(a){if(a.setNum===setNum)setExtra+=a.extraDays;});
+    var end=new Date(start);end.setDate(start.getDate()+this.data.setup.daysPerSet-1+setExtra);
+    return {start:start,end:end,extraDays:setExtra,totalDays:this.data.setup.daysPerSet+setExtra};
+  },
+  getProgress:function(){
+    if(!this.data.setup.startDate||this.data.currentDay<=0)return 0;
+    var td=this.totalTreatmentDays();if(td<=0)return 0;
+    return Math.min(100,Math.max(0,(this.data.currentDay-1)/td*100));
+  },
   /* Init */
   init:function(){
     var self=this;
@@ -424,38 +488,58 @@ var App = {
     this.renderPhotos();this.renderTimelapseOptions();this.renderMilestones();
     this.renderPainHistory();this.renderTips();this.renderSymptomButtons();
     this.updateStats();this.renderChangeHistory();this.renderCompCatOptions();
-    this.renderCatManager();
+    this.renderCatManager();this.renderPostponeHistory();
+    document.getElementById('inName').value=this.data.setup.name||'';
+    document.getElementById('inGender').value=this.data.setup.gender||'';
     document.getElementById('inUpper').value=this.data.setup.upperSets;
     document.getElementById('inLower').value=this.data.setup.lowerSets;
-    document.getElementById('inDays').value=this.data.setup.daysPerSet;
+    document.getElementById('inWeeks').value=Math.round(this.data.setup.daysPerSet/7)||2;
     document.getElementById('inStart').value=this.data.setup.startDate;
+    if(this.data.setup.startDate)this.setupSaved=true;
     var th=this.data.wearLog[this.today()]||0;
     if(th>0)document.getElementById('inHours').value=th;
   },
   /* Setup */
+  setupSaved:false,
   saveSetup:function(){
+    var hadData=!!this.data.setup.startDate;
+    if(hadData&&this.setupSaved){
+      if(!confirm('You already have a treatment setup. Changing it may affect your calendar and progress history. Continue?'))return;
+    }
+    var startVal=document.getElementById('inStart').value;
+    var weeks=parseInt(document.getElementById('inWeeks').value)||2;
+    if(!startVal){this.toast('\u26a0\ufe0f Please set a treatment start date');return;}
+    this.data.setup.name=(document.getElementById('inName').value||'').trim();
+    this.data.setup.gender=document.getElementById('inGender').value||'';
     this.data.setup.upperSets=Math.max(1,parseInt(document.getElementById('inUpper').value)||10);
     this.data.setup.lowerSets=Math.max(1,parseInt(document.getElementById('inLower').value)||16);
-    this.data.setup.daysPerSet=Math.max(1,parseInt(document.getElementById('inDays').value)||14);
-    this.data.setup.startDate=document.getElementById('inStart').value||'2026-02-27';
+    this.data.setup.daysPerSet=Math.max(7,weeks*7);
+    this.data.setup.startDate=startVal;
+    this.setupSaved=true;
     this.computeSetDay();this.saveData();
     this.updateHeader();this.updateOverview();this.renderCalendars();
-    this.renderMilestones();this.updateStats();this.renderCompCatOptions();
+    this.renderMilestones();this.updateStats();this.renderCompCatOptions();this.renderPostponeHistory();
     this.toast('\u2705 Setup saved!');
   },
   updateHeader:function(){
-    var ts=this.totalSets(),pct=Math.min(100,Math.max(0,((this.data.currentSet-1)/ts*100))).toFixed(0);
+    var ts=this.totalSets(),pct=this.getProgress().toFixed(0);
+    var name=this.data.setup.name;
+    document.getElementById('hdrTitle').textContent=name?('\ud83e\uddb7 '+name+'\'s Aligner Journey'):'\ud83e\uddb7 Aligner Journey';
+    if(!this.data.setup.startDate){
+      document.getElementById('hdrDay').textContent='Not started';
+      document.getElementById('hdrSet').textContent='--/--';
+      document.getElementById('hdrPct').textContent='0%';return;
+    }
     document.getElementById('hdrDay').textContent='Day '+this.data.currentDay;
     document.getElementById('hdrSet').textContent='Set '+Math.min(this.data.currentSet,ts)+'/'+ts;
     document.getElementById('hdrPct').textContent=pct+'% Complete';
   },
   updateOverview:function(){
-    var ts=this.totalSets(),td=ts*this.data.setup.daysPerSet;
-    var pct=Math.min(100,Math.max(0,((this.data.currentSet-1)/ts*100)));
+    var td=this.totalTreatmentDays(),pct=this.getProgress();
     document.getElementById('ringCircle').style.strokeDashoffset=565.48-(pct/100)*565.48;
     document.getElementById('ringPct').textContent=pct.toFixed(0)+'%';
     document.getElementById('statTotal').textContent=td;
-    document.getElementById('statLeft').textContent=Math.max(0,td-this.data.currentDay);
+    document.getElementById('statLeft').textContent=Math.max(0,td-(this.data.currentDay||0));
   },
   /* Calendar */
   renderCalendars:function(){
@@ -464,14 +548,16 @@ var App = {
   },
   renderCalendar:function(sets,container,type){
     container.textContent='';
-    var start=new Date(this.data.setup.startDate),now=new Date();now.setHours(0,0,0,0);
+    if(!this.data.setup.startDate){var p=document.createElement('p');p.style.cssText='color:var(--muted);text-align:center;font-size:.85rem';p.textContent='Set a start date in Setup first.';container.appendChild(p);return;}
+    var now=new Date();now.setHours(0,0,0,0);
     for(var i=1;i<=sets;i++){
-      var s=new Date(start);s.setDate(start.getDate()+(i-1)*this.data.setup.daysPerSet);
-      var e=new Date(s);e.setDate(s.getDate()+this.data.setup.daysPerSet-1);
+      var dates=this.getSetDates(i),s=dates.start,e=dates.end;
       var isA=now>=s&&now<=e,isD=now>e;
       var item=document.createElement('div');
       item.className='cal-item'+(isA?' active':'')+(isD?' done':'');
-      var sn=document.createElement('div');sn.className='sn';sn.textContent='Set '+i;item.appendChild(sn);
+      var sn=document.createElement('div');sn.className='sn';sn.textContent='Set '+i;
+      if(dates.extraDays>0){sn.textContent+=' (+'+dates.extraDays+'d)';}
+      item.appendChild(sn);
       var sd=document.createElement('div');sd.className='sd';
       sd.textContent=s.toLocaleDateString('en-IN',{day:'numeric',month:'short'})+' \u2013 '+e.toLocaleDateString('en-IN',{day:'numeric',month:'short'});
       item.appendChild(sd);
@@ -908,17 +994,77 @@ var App = {
   /* Change History */
   renderChangeHistory:function(){
     var c=document.getElementById('changeHistory');c.textContent='';
-    var recent=this.data.changeLog.slice().reverse().slice(0,10);
+    var btn=document.getElementById('btnClearHistory');
+    var recent=this.data.changeLog.slice().reverse().slice(0,20);
     if(recent.length===0){var p=document.createElement('p');
       p.style.cssText='color:var(--muted);text-align:center;font-size:.85rem';
-      p.textContent='No changes logged yet.';c.appendChild(p);return;}
+      p.textContent='No changes logged yet.';c.appendChild(p);btn.classList.add('hidden');return;}
+    btn.classList.remove('hidden');
+    var self=this;
     recent.forEach(function(entry){
+      var origIdx=self.data.changeLog.indexOf(entry);
       var item=document.createElement('div');item.className='note-item';
+      item.style.cssText='display:flex;align-items:center;gap:.5rem;padding:.6rem';
+      var info=document.createElement('div');info.style.cssText='flex:1';
       var d=document.createElement('div');d.className='nd';
       d.textContent=App.dateFmt(entry.date,{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-      item.appendChild(d);
-      var t=document.createElement('div');t.className='nt';t.textContent='Changed to Set '+entry.set;item.appendChild(t);
-      c.appendChild(item);
+      info.appendChild(d);
+      var t=document.createElement('div');t.className='nt';t.textContent='Changed to Set '+entry.set;info.appendChild(t);
+      item.appendChild(info);
+      var del=document.createElement('button');del.className='btn btn-small btn-danger';
+      del.textContent='\u2715';del.style.cssText='width:auto;padding:.2rem .5rem;min-height:auto;flex-shrink:0';
+      (function(idx){del.addEventListener('click',function(){self.deleteChangeEntry(idx);});})(origIdx);
+      item.appendChild(del);c.appendChild(item);
+    });
+  },
+  deleteChangeEntry:function(idx){
+    if(idx>=0&&idx<this.data.changeLog.length){
+      this.data.changeLog.splice(idx,1);this.saveData();this.renderChangeHistory();
+      this.toast('Entry deleted');
+    }
+  },
+  clearChangeHistory:function(){
+    if(!confirm('Delete all change history entries?'))return;
+    this.data.changeLog=[];this.saveData();this.renderChangeHistory();this.toast('History cleared');
+  },
+  postponeCurrentSet:function(){
+    if(!this.data.setup.startDate){this.toast('\u26a0\ufe0f Complete setup first');return;}
+    var days=parseInt(document.getElementById('inPostpone').value);
+    if(!days||days<1){this.toast('\u26a0\ufe0f Enter number of extra days');return;}
+    var reason=(document.getElementById('inPostponeReason').value||'').trim();
+    var cs=this.data.currentSet||1;
+    if(!confirm('Extend Set '+cs+' by '+days+' day'+(days>1?'s':'')+' and shift all following sets?'))return;
+    this.data.setup.adjustments.push({setNum:cs,extraDays:days,date:new Date().toISOString(),reason:reason});
+    this.computeSetDay();this.saveData();
+    document.getElementById('inPostpone').value='';document.getElementById('inPostponeReason').value='';
+    this.renderCalendars();this.updateHeader();this.updateOverview();this.renderPostponeHistory();
+    this.toast('\u2705 Set '+cs+' extended by '+days+' day'+(days>1?'s':''));
+  },
+  renderPostponeHistory:function(){
+    var c=document.getElementById('postponeHistory');c.textContent='';
+    var adjs=this.data.setup.adjustments||[];
+    if(adjs.length===0)return;
+    var h=document.createElement('p');h.style.cssText='font-size:.8rem;color:var(--muted);margin-bottom:.4rem;font-weight:600';
+    h.textContent='Postponement History:';c.appendChild(h);
+    var self=this;
+    adjs.slice().reverse().forEach(function(a,ri){
+      var idx=adjs.length-1-ri;
+      var item=document.createElement('div');item.className='note-item';
+      item.style.cssText='display:flex;align-items:center;gap:.5rem;padding:.5rem';
+      var info=document.createElement('div');info.style.cssText='flex:1;font-size:.8rem';
+      info.textContent='Set '+a.setNum+': +'+a.extraDays+'d';
+      if(a.reason)info.textContent+=' ('+a.reason+')';
+      info.textContent+=' \u2013 '+App.dateFmt(a.date,{day:'numeric',month:'short'});
+      item.appendChild(info);
+      var del=document.createElement('button');del.className='btn btn-small btn-danger';
+      del.textContent='\u2715';del.style.cssText='width:auto;padding:.2rem .5rem;min-height:auto;flex-shrink:0';
+      (function(i){del.addEventListener('click',function(){
+        if(!confirm('Remove this postponement? Calendar will recalculate.'))return;
+        self.data.setup.adjustments.splice(i,1);self.computeSetDay();self.saveData();
+        self.renderCalendars();self.updateHeader();self.updateOverview();self.renderPostponeHistory();
+        self.toast('Postponement removed');
+      });})(idx);
+      item.appendChild(del);c.appendChild(item);
     });
   },
   confirmSetChange:function(){
@@ -936,24 +1082,35 @@ var App = {
       try{new Notification('Aligner Journey',{body:body,icon:'icon-192.png'});}catch(e){}}
   },
   scheduleReminders:function(){
-    var now=new Date(),self=this;
-    var morning=new Date(now);morning.setHours(8,30,0,0);
-    var evening=new Date(now);evening.setHours(21,0,0,0);
-    if(morning>now)setTimeout(function(){self.sendNotif('Good morning! Remember to wear and log aligner time.');},morning-now);
-    if(evening>now)setTimeout(function(){self.sendNotif('Don\'t forget to log today\'s wear time and photo.');},evening-now);
+    var self=this;
+    this.checkNotifications();
+    setInterval(function(){self.checkNotifications();},300000);
+    document.addEventListener('visibilitychange',function(){if(!document.hidden)self.checkNotifications();});
+  },
+  checkNotifications:function(){
+    if(!('Notification' in window)||Notification.permission!=='granted')return;
+    var now=new Date(),h=now.getHours(),m=now.getMinutes(),td=this.today();
+    if(h===8&&m>=25&&m<=40&&this.data.notifications.lastMorning!==td){
+      this.data.notifications.lastMorning=td;this.saveData();
+      this.sendNotif('Good morning! Remember to wear your aligners and log your time.');
+    }
+    if(h===21&&m>=0&&m<=15&&this.data.notifications.lastEvening!==td){
+      this.data.notifications.lastEvening=td;this.saveData();
+      var logged=!!this.data.wearLog[td];
+      this.sendNotif(logged?'Great job logging today! Don\'t forget your progress photo.':'Don\'t forget to log today\'s wear time and take a photo.');
+    }
+    this.checkSetChangeDay();
   },
   checkSetChangeDay:function(){
-    var start=new Date(this.data.setup.startDate),now=new Date();
-    start.setHours(0,0,0,0);now.setHours(0,0,0,0);
-    var dp=Math.floor((now-start)/86400000);
-    var isCD=dp>=0&&dp%this.data.setup.daysPerSet===0;
-    if(isCD&&this.data.notifications.setChangeConfirmedDate!==this.today()){
+    if(!this.data.setup.startDate)return;
+    var ts=this.totalSets(),cs=this.data.currentSet;
+    if(!cs||cs<=0||cs>ts)return;
+    var dates=this.getSetDates(cs);
+    var now=new Date();now.setHours(0,0,0,0);
+    var isFirstDay=now.getTime()===dates.start.getTime();
+    if(isFirstDay&&this.data.notifications.setChangeConfirmedDate!==this.today()){
       document.getElementById('setChangeBanner').classList.add('show');
-      var self=this;
-      setInterval(function(){
-        if(self.data.notifications.setChangeConfirmedDate!==self.today())
-          self.sendNotif('Today is Set '+self.data.currentSet+' change day! Confirm when switched.');
-      },3600000);
+      this.sendNotif('Today is Set '+cs+' change day! Open the app to confirm you switched.');
     }
   },
   /* Event Bindings */
@@ -981,6 +1138,8 @@ var App = {
     document.getElementById('importFile').addEventListener('change',function(e){if(e.target.files[0])self.importBackup(e.target.files[0]);});
     document.getElementById('compCat').addEventListener('change',function(){self.renderComparison();});
     document.getElementById('setChangeBanner').addEventListener('click',function(){self.confirmSetChange();});
+    document.getElementById('btnPostpone').addEventListener('click',function(){self.postponeCurrentSet();});
+    document.getElementById('btnClearHistory').addEventListener('click',function(){self.clearChangeHistory();});
   }
 };
 document.addEventListener('DOMContentLoaded',function(){App.init().catch(function(e){console.error('Init error:',e);});});
